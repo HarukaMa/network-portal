@@ -388,7 +388,7 @@ const Gateway = () => {
             <div className="flex min-w-72 flex-col gap-6">
               <StatsPanel gateway={gateway} />
               {gateway?.weights && gateway?.status === 'joined' && (
-                <div className="w-full rounded-xl border border-transparent-100-16 text-sm">
+                <div className="w-full overflow-hidden rounded-xl border border-transparent-100-16 text-sm">
                   <div className="bg-containerL3 px-6 py-4">
                     <div className="text-high">Weights</div>
                   </div>
@@ -418,7 +418,7 @@ const Gateway = () => {
               {gateway?.status === 'joined' && (
                 <InfrastructureDetails gateway={gateway} />
               )}
-              <div className="w-full rounded-xl border border-transparent-100-16 text-sm">
+              <div className="w-full overflow-hidden rounded-xl border border-transparent-100-16 text-sm">
                 <div className="bg-containerL3 px-6 py-4">
                   <div className="text-high">Pricing</div>
                 </div>

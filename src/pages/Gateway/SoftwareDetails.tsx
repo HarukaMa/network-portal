@@ -26,7 +26,7 @@ const SoftwareDetails = ({ gateway }: { gateway?: GatewayWithAddress }) => {
   }, [gateway]);
 
   return (
-    <div className="w-full rounded-xl border border-transparent-100-16 text-sm">
+    <div className="w-full overflow-hidden rounded-xl border border-transparent-100-16 text-sm">
       <div className="bg-containerL3 px-6 py-4">
         <div className="text-high">Software</div>
       </div>
