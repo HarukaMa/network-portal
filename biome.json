@@ -90,6 +90,7 @@
     "globals": [
       "chrome",
       "__NPM_PACKAGE_VERSION__",
+      "__BUILD_COMMIT__",
       "JSX",
       "React",
       "describe",

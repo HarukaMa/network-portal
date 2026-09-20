@@ -4,6 +4,7 @@ import {
   ARIO_SWAP_URL,
   SOLANA_EXPLORER_URL,
 } from '@src/constants';
+import { BUILD_COMMIT } from '@src/version';
 import { useState } from 'react';
 import { useLocation, useNavigate } from 'react-router-dom';
 
@@ -244,7 +245,7 @@ const Sidebar = () => {
                   closeMobileMenu();
                 }}
               >
-                v{APP_VERSION}-{import.meta.env.VITE_GITHUB_HASH?.slice(0, 6)}
+                v{APP_VERSION}-{BUILD_COMMIT.slice(0, 6)}
               </button>
             )}
 

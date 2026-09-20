@@ -88,7 +88,7 @@ jobs:
         env:
           # FOR BUILD
           VITE_NODE_ENV: production
-          VITE_GITHUB_HASH: ${{ github.sha }}
+          BUILD_COMMIT: ${{ github.sha }}
           VITE_ARIO_PROCESS_ID: ${{ vars.VITE_ARIO_PROCESS_ID }}
           VITE_AO_CU_URL: ${{ vars.VITE_AO_CU_URL }}
           # Carry provider auth tokens — secrets (masked in logs), not vars.
@@ -140,7 +140,7 @@ jobs:
           yarn build
         env:
           VITE_NODE_ENV: production
-          VITE_GITHUB_HASH: ${{ github.sha }}
+          BUILD_COMMIT: ${{ github.sha }}
           VITE_ARIO_PROCESS_ID: ${{ vars.VITE_ARIO_PROCESS_ID }}
           VITE_AO_CU_URL: ${{ vars.VITE_AO_CU_URL }}
           # Carry provider auth tokens — secrets (masked in logs), not vars.
