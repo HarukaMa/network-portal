@@ -5,6 +5,10 @@ import Placeholder from '@src/components/Placeholder';
 import useEpochs from '@src/hooks/useEpochs';
 import useObservations from '@src/hooks/useObservations';
 import {
+  describeCaptureShortfall,
+  summarizeCapture,
+} from '@src/utils/observationCapture';
+import {
   CheckCircleIcon,
   CircleHelpIcon,
   NotebookText,
@@ -27,6 +31,13 @@ const ReportedOnByCard = ({
     : 0;
   const hasAttribution =
     observations?.hasGatewayAttribution && !!gateway && totalReports > 0;
+  const captureShortfall = describeCaptureShortfall(
+    summarizeCapture({
+      capture: observations?.capture,
+      held: totalReports,
+      chainObservationsSubmitted: observations?.chainObservationsSubmitted,
+    }),
+  );
 
   return (
     <div className="w-full overflow-hidden rounded-xl border border-transparent-100-16 text-sm">
@@ -50,8 +61,8 @@ const ReportedOnByCard = ({
                   </div>
                 ) : (
                   <div className="text-mid">
-                    {totalReports} report{totalReports === 1 ? '' : 's'}{' '}
-                    submitted
+                    {captureShortfall ??
+                      `${totalReports} report${totalReports === 1 ? '' : 's'} submitted`}
                   </div>
                 )}
               </div>
@@ -104,6 +115,12 @@ const ReportedOnByCard = ({
             reports={observations.reports}
             epochIndex={selectedEpoch.epochIndex}
             gatewayAddress={gateway.gatewayAddress}
+            failedObservers={
+              hasAttribution
+                ? (observations.failureSummaries[gateway.gatewayAddress] ?? [])
+                : undefined
+            }
+            captureShortfall={captureShortfall ?? undefined}
           />
         )}
       </div>
@@ -118,6 +135,13 @@ const ReportedOnCard = ({
   const [selectedEpochIndex, setSelectedEpochIndex] = useState(0);
   const selectedEpoch = epochs?.[selectedEpochIndex];
   const { data: observations } = useObservations(selectedEpoch);
+  const captureShortfall = describeCaptureShortfall(
+    summarizeCapture({
+      capture: observations?.capture,
+      held: observations?.observationCount ?? 0,
+      chainObservationsSubmitted: observations?.chainObservationsSubmitted,
+    }),
+  );
   const navigate = useNavigate();
   const address = gateway?.observerAddress;
   const reportId = address ? observations?.reports[address] : undefined;
@@ -158,9 +182,10 @@ const ReportedOnCard = ({
                   </div>
                 ) : (
                   <div className="text-low">
-                    {selectedForObservation
-                      ? 'No report submitted'
-                      : 'Not Selected for Observation'}
+                    {captureShortfall ??
+                      (selectedForObservation
+                        ? 'No report submitted'
+                        : 'Not Selected for Observation')}
                   </div>
                 )}
               </div>
@@ -206,6 +231,7 @@ const ReportedOnCard = ({
             epochIndex={selectedEpoch.epochIndex}
             gatewayAddress={gateway.gatewayAddress}
             observerAddress={gateway.observerAddress}
+            captureShortfall={captureShortfall ?? undefined}
           />
         )}
       </div>

@@ -14,6 +14,10 @@ import useGateways from '@src/hooks/useGateways';
 import useObservations from '@src/hooks/useObservations';
 import useObserverRollup from '@src/hooks/useObserverRollup';
 import { formatPercentage, formatWithCommas } from '@src/utils';
+import {
+  describeCaptureShortfall,
+  summarizeCapture,
+} from '@src/utils/observationCapture';
 import EpochFindings from './EpochFindings';
 
 interface TableData {
@@ -21,8 +25,10 @@ interface TableData {
   domain: string;
   gatewayAddress: string;
   observerAddress: string;
-  ncw: number;
-  successRatio: number;
+  /** Share of total composite weight, 0..1. Undefined when not yet known. */
+  ncw?: number;
+  /** Observer performance ratio, 0..1. Undefined when not yet known. */
+  successRatio?: number;
   observedEpochs: number;
   prescribedEpochs: number;
   reportStatus: string;
@@ -63,6 +69,13 @@ const ObserversTable = () => {
 
   const { isError: observationsError, data: observations } =
     useObservations(selectedEpoch);
+  const captureShortfall = describeCaptureShortfall(
+    summarizeCapture({
+      capture: observations?.capture,
+      held: observations?.observationCount ?? 0,
+      chainObservationsSubmitted: observations?.chainObservationsSubmitted,
+    }),
+  );
   // Additive: absent whenever the analyzer endpoint is unset, in which case the
   // independence column simply renders as unavailable.
   const { data: observerRollup } = useObserverRollup();
@@ -75,7 +88,10 @@ const ObserversTable = () => {
   const observersTableData = useMemo(() => {
     if (!observers || !gateways) return [];
 
-    // Compute total composite weight from all gateways for normalization
+    // Normalisation denominator. `normalizedCompositeWeight` is not usable
+    // here: the plural gateway read leaves it at 0 even where the single
+    // gateway read computes it, so the share is derived from the composite
+    // weights, which the plural read does populate.
     const totalCompositeWeight = Object.values(gateways).reduce(
       (sum, gw) => sum + (gw.weights?.compositeWeight ?? 0),
       0,
@@ -83,6 +99,23 @@ const ObserversTable = () => {
 
     return observers.map((observer) => {
       const gateway = gateways[observer.gatewayAddress];
+      /**
+       * Weights come from the gateway record, NOT from the prescribed
+       * observer beside it.
+       *
+       * `fetchEpochLightweight` reads the Epoch PDA in one call, and that
+       * account carries only the prescribed observers' addresses — no
+       * weights. To satisfy `WeightedObserver` it fills every weight with a
+       * placeholder `0`, so reading them here rendered 0.00% for every
+       * observer in both of these columns, in every epoch, always.
+       *
+       * The fix must not be to make the epoch fetch heavier: populating
+       * those fields is what the ~50 per-gateway reads it exists to avoid
+       * would buy. `useGateways()` is already loaded on this page, and
+       * already snapshot-backed where the portal API is configured, so
+       * taking the weights from it costs nothing at all.
+       */
+      const weights = gateway?.weights;
 
       const submitted = observations?.reports[observer.observerAddress];
       const status = observations
@@ -106,9 +139,9 @@ const ObserversTable = () => {
       const rollup = observerRollup?.byObserver.get(observer.observerAddress);
 
       const ncw =
-        observer.compositeWeight && totalCompositeWeight > 0
-          ? observer.compositeWeight / totalCompositeWeight
-          : 0;
+        weights?.compositeWeight !== undefined && totalCompositeWeight > 0
+          ? weights.compositeWeight / totalCompositeWeight
+          : undefined;
 
       return {
         label: gateway?.settings.label ?? '',
@@ -119,8 +152,8 @@ const ObserversTable = () => {
         observedEpochs: (gateway?.stats.observedEpochCount ?? 0) + 1,
         prescribedEpochs: (gateway?.stats.prescribedEpochCount ?? 0) + 1,
         successRatio:
-          observer.observerPerformanceRatio ||
-          observer.observerRewardRatioWeight,
+          weights?.observerPerformanceRatio ??
+          weights?.observerRewardRatioWeight,
         reportStatus:
           status ?? (selectedEpochIndex === 0 ? 'Pending' : 'Loading...'),
         failedGateways: numFailedGatewaysFound,
@@ -203,7 +236,13 @@ const ObserversTable = () => {
       id: 'ncw',
       header: 'Observation Chance',
       sortDescFirst: true,
-      cell: ({ row }) => formatPercentage(row.original.ncw),
+      // A gateway missing from the roster has no weight to show. Rendering
+      // 0.00% there would state a chance of never being selected.
+      cell: ({ row }) =>
+        row.original.ncw === undefined
+          ? '—'
+          : formatPercentage(row.original.ncw),
+      sortUndefined: 'last',
     }),
     columnHelper.accessor('successRatio', {
       id: 'successRatio',
@@ -218,9 +257,12 @@ const ObserversTable = () => {
             </div>
           }
         >
-          {`${(row.original.successRatio * 100).toFixed(2)}%`}
+          {row.original.successRatio === undefined
+            ? '—'
+            : `${(row.original.successRatio * 100).toFixed(2)}%`}
         </Tooltip>
       ),
+      sortUndefined: 'last',
     }),
     columnHelper.accessor('reportStatus', {
       id: 'reportStatus',
@@ -336,6 +378,14 @@ const ObserversTable = () => {
                   Observers citing the same report are worth a look, not proof
                   of coordination — independent observers can legitimately reach
                   the same one.
+                  {/* The ratio stays valid under a shortfall — both halves come
+                      from the rows we hold — but it stops describing the whole
+                      epoch, and a reader has no way to tell from the chip. */}
+                  {captureShortfall && (
+                    <div className="pt-2 text-warning">
+                      {captureShortfall}. This counts only what was captured.
+                    </div>
+                  )}
                 </div>
               }
             >

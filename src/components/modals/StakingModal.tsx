@@ -29,7 +29,14 @@ const StakingModal = ({
   const { data: balances } = useBalances(walletAddress);
   const ticker = useGlobalState((state) => state.ticker);
 
-  const [currentStake, setCurrentStake] = useState<number>(0);
+  // `undefined` until the wallet's delegations load, which is NOT the same as
+  // zero. The minimum below turns on whether stake already exists, and
+  // `useDelegateStakes` inherits the client's `retry: 0`, so seeding this to 0
+  // would leave an existing delegator looking like a new one indefinitely
+  // after one failed read — holding them to a minimum they are exempt from.
+  const [currentStake, setCurrentStake] = useState<number | undefined>(
+    undefined,
+  );
   const [amountToStake, setAmountToStake] = useState<string>('');
 
   const [showReviewStakeModal, setShowReviewStakeModal] = useState(false);
@@ -53,7 +60,7 @@ const StakingModal = ({
   const allowDelegatedStaking =
     gateway?.settings.allowDelegatedStaking ?? false;
 
-  const newTotalStake = currentStake + parseFloat(amountToStake);
+  const newTotalStake = (currentStake ?? 0) + parseFloat(amountToStake);
   const newStake = parseFloat(amountToStake);
   const rewardsInfo = useRewardsInfo(gateway, newStake);
   const EAY =
@@ -66,7 +73,25 @@ const StakingModal = ({
   const minDelegatedStake = gateway
     ? new mARIOToken(gateway?.settings.minDelegatedStake).toARIO().valueOf()
     : 10;
-  const minRequiredStakeToAdd = currentStake > 0 ? 1 : minDelegatedStake;
+  // The gateway's minimum applies only to a FIRST delegation. `delegate_stake`
+  // guards the check with `delegation.amount == 0`, read before the handler
+  // mutates it, so a wallet already holding stake here may add any amount above
+  // zero — which is what stops an operator who raises their minimum from
+  // stranding delegators already in.
+  //
+  // This was unconditional until the program was fixed, because it genuinely
+  // had to be: until then `delegate_stake` required
+  // `amount >= min_delegation_amount` on every deposit and rejected a smaller
+  // top-up with `DelegationBelowMinimum`. Offering one the chain refuses is
+  // worse than refusing it here, so the form matched the stricter rule and said
+  // so. The mainnet GAR program carrying the exemption deployed at slot
+  // 454578042; keeping the old rule now refuses top-ups the chain accepts.
+  //
+  // 1 ARIO rather than the protocol's 1 mARIO floor, matching every other stake
+  // form in the app.
+  const stakeLoaded = currentStake !== undefined;
+  const minRequiredStakeToAdd =
+    currentStake !== undefined && currentStake > 0 ? 1 : minDelegatedStake;
 
   const validators = {
     address: validateWalletAddress('Gateway Owner'),
@@ -79,7 +104,7 @@ const StakingModal = ({
   };
 
   const isFormValid = () => {
-    if (!gateway || !allowDelegatedStaking) {
+    if (!gateway || !allowDelegatedStaking || !stakeLoaded) {
       return false;
     }
     return validators.stakeAmount(amountToStake) === undefined;
@@ -97,14 +122,20 @@ const StakingModal = ({
 
   const disableInput =
     !gateway ||
+    !stakeLoaded ||
     (balances?.ario || 0) < minRequiredStakeToAdd ||
     !allowDelegatedStaking;
 
   const errorMessages = {
     stakeAmount: validators.stakeAmount(amountToStake),
-    cannotStake:
-      (balances?.ario || 0) < minRequiredStakeToAdd
-        ? `Insufficient balance, at least ${minRequiredStakeToAdd} IO required.`
+    // Silent until the stake is known: while it is not,
+    // `minRequiredStakeToAdd` is the gateway minimum by default, and naming it
+    // would tell an existing delegator they need a figure they are exempt
+    // from. `disableInput` already covers the waiting state.
+    cannotStake: !stakeLoaded
+      ? undefined
+      : (balances?.ario || 0) < minRequiredStakeToAdd
+        ? `Insufficient balance, at least ${minRequiredStakeToAdd} ${ticker} required.`
         : !allowDelegatedStaking
           ? 'Gateway does not allow delegated staking.'
           : undefined,
@@ -170,6 +201,7 @@ const StakingModal = ({
               }}
             />
             {gateway &&
+              stakeLoaded &&
               (amountToStake?.length > 0 ||
                 (balances?.ario || 0) < minRequiredStakeToAdd ||
                 !allowDelegatedStaking) &&
@@ -195,13 +227,13 @@ const StakingModal = ({
           <div className="flex flex-col gap-2">
             <LabelValueRow
               label="Existing Stake:"
-              value={`${currentStake} ${ticker}`}
+              value={stakeLoaded ? `${currentStake} ${ticker}` : '-'}
             />
 
             <LabelValueRow
               label="New Total Stake:"
               value={`${
-                isFormValid()
+                isFormValid() && currentStake !== undefined
                   ? formatWithCommas(currentStake + parseFloat(amountToStake))
                   : '-'
               } ${ticker}`}

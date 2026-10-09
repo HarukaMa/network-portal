@@ -1,7 +1,6 @@
-/// <reference types="vite-plugin-svgr/client" />
+import ArioTokenLogoIcon from './ario-token-logo.svg?react';
 import ArioWordmarkIcon from './ario-wordmark.svg?react';
 import ArioLogoIcon from './ario.svg?react';
-import ArioCoinIcon from './ario_coin.svg?react';
 import BannerRightChevron from './banner_right_chevron.svg?react';
 import BinocularsIcon from './binoculars.svg?react';
 import BinocularsGradientIcon from './binoculars_gradient.svg?react';
@@ -19,13 +18,13 @@ import CopyCheckedIcon from './copy_checked.svg?react';
 import DashboardIcon from './dashboard.svg?react';
 import DocsIcon from './docs.svg?react';
 import EditIcon from './edit_icon.svg?react';
+import ExpeditedWithdrawalIcon from './expedited_withdrawal.svg?react';
 import FailSquareIcon from './fail_square.svg?react';
 import FormErrorIcon from './form_error.svg?react';
 import GatewayIcon from './gateway.svg?react';
 import GatewayHoverIcon from './gateway_hover.svg?react';
 import GatewaysIcon from './gateways.svg?react';
 import InfoIcon from './info_icon.svg?react';
-import InstantWithdrawalIcon from './instant_withdrawal.svg?react';
 import LinkArrowIcon from './link_arrow.svg?react';
 import LogoutIcon from './logout.svg?react';
 import ObserversBgIcon from './observers_bg.svg?react';
@@ -48,7 +47,7 @@ import WarningIcon from './warning.svg?react';
 import WarningTriangleIcon from './warning_triangle.svg?react';
 
 export {
-  ArioCoinIcon,
+  ArioTokenLogoIcon,
   ArioLogoIcon,
   ArioWordmarkIcon,
   BannerRightChevron,
@@ -68,13 +67,13 @@ export {
   DashboardIcon,
   DocsIcon,
   EditIcon,
+  ExpeditedWithdrawalIcon,
   FailSquareIcon,
   FormErrorIcon,
   GatewayHoverIcon,
   GatewayIcon,
   GatewaysIcon,
   InfoIcon,
-  InstantWithdrawalIcon,
   LinkArrowIcon,
   LogoutIcon,
   ObserversBgIcon,

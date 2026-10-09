@@ -1,3 +1,4 @@
+import useObservationReports from '@src/hooks/useObservationReports';
 import { renderToStaticMarkup } from 'react-dom/server';
 import { StaticRouter } from 'react-router-dom/server';
 import { describe, expect, it, vi } from 'vitest';
@@ -22,26 +23,47 @@ vi.mock('@src/utils/arweaveUrl', () => ({
 }));
 
 vi.mock('@src/hooks/useObservationReports', () => ({
-  default: () => ({
+  default: vi.fn(() => ({
     data: {
       shared: {
         observer: 'author',
         assessments: [
-          { host: 'gateway.example', wallets: ['wallet'], pass: true },
+          {
+            host: 'gateway.example',
+            wallets: ['wallet'],
+            pass: true,
+            reasons: [],
+          },
         ],
       },
       mixed: {
         assessments: [
-          { host: 'passing.example', wallets: ['other-wallet'], pass: true },
-          { host: 'z-failing.example', wallets: ['wallet'], pass: false },
-          { host: 'a-failing.example', wallets: ['wallet'], pass: false },
+          {
+            host: 'passing.example',
+            wallets: ['other-wallet'],
+            pass: true,
+            reasons: [],
+          },
+          {
+            host: 'z-failing.example',
+            wallets: ['wallet'],
+            pass: false,
+            reasons: ['Response code 503'],
+          },
+          {
+            host: 'a-failing.example',
+            wallets: ['wallet'],
+            pass: false,
+            reasons: [],
+          },
         ],
       },
       missing: null,
     },
     isFetching: false,
-    refetch: vi.fn(),
-  }),
+    loading: new Set<string>(),
+    loadReports: vi.fn(),
+  })),
 }));
 
 describe('observation report results', () => {
@@ -173,5 +195,137 @@ describe('observation report results', () => {
     expect(text.indexOf('z-failing.example')).toBeLessThan(
       text.indexOf('passing.example'),
     );
+    expect(text).toContain('Response code 503');
+  });
+
+  it.each([
+    ['shared', ['author'], 'Passed', 'Failed'],
+    ['mixed', [], 'Failed', 'Passed'],
+  ] as const)(
+    'shows report/vote disagreements for %s',
+    (report, failedObservers, result, vote) => {
+      const html = renderToStaticMarkup(
+        <StaticRouter location="/">
+          <ObservationReports
+            epochIndex={546}
+            gatewayAddress="wallet"
+            reports={{ author: report }}
+            failedObservers={[...failedObservers]}
+          />
+        </StaticRouter>,
+      );
+      const text = html.replace(/<[^>]*>/g, '');
+      expect(text).toContain(`Submitted result: ${vote}. Report: ${result}.`);
+      expect(html).toContain(`>${result}</div>`);
+      if (report === 'mixed') expect(text).toContain('Response code 503');
+    },
+  );
+
+  it('keeps complete report rows when every archived vote passes', () => {
+    const html = renderToStaticMarkup(
+      <StaticRouter location="/">
+        <ObservationReports
+          epochIndex={546}
+          gatewayAddress="wallet"
+          reports={{ author: 'shared', other: 'mixed', unavailable: 'missing' }}
+          failedObservers={[]}
+        />
+      </StaticRouter>,
+    );
+    const text = html.replace(/<[^>]*>/g, '');
+    expect(text).toContain(
+      '1 failed, 1 passed, 1 unavailable of 3 submissions',
+    );
+    expect(text).toContain('Submitted result: Passed. Report: Failed.');
+    expect(text).toContain('Named Gateway');
+    expect(text).toContain('other.example');
+    expect(text).toContain('unavailable');
+  });
+
+  it('shows incomplete archive capture without claiming no reports were submitted', () => {
+    const html = renderToStaticMarkup(
+      <StaticRouter location="/">
+        <ObservationReports
+          epochIndex={546}
+          gatewayAddress="wallet"
+          reports={{}}
+          captureShortfall="10 submitted; reports unavailable"
+        />
+      </StaticRouter>,
+    );
+    expect(html).toContain('10 submitted; reports unavailable');
+    expect(html).not.toContain('No reports submitted');
+  });
+
+  it('renders all observer rows and submitted results before reports are loaded', () => {
+    const html = renderToStaticMarkup(
+      <StaticRouter location="/">
+        <ObservationReports
+          epochIndex={546}
+          gatewayAddress="wallet"
+          reports={{ author: 'unread', other: 'also-unread' }}
+          failedObservers={['author']}
+        />
+      </StaticRouter>,
+    );
+    const text = html.replace(/<[^>]*>/g, '');
+    expect(text).toContain('Named Gateway');
+    expect(text).toContain('other.example');
+    expect(text).toContain('Submitted: Failed');
+    expect(text).toContain('Submitted: Passed');
+    expect(text).toContain('2 not loaded of 2 submissions');
+    expect(text).not.toContain('Unavailable');
+    expect(text).toContain('Load failed reports');
+    expect(text).toContain('Load all reports');
+  });
+
+  it('renders a completed report while another is still loading', () => {
+    vi.mocked(useObservationReports).mockReturnValueOnce({
+      data: {
+        complete: {
+          assessments: [
+            {
+              host: 'old.example',
+              wallets: ['wallet'],
+              pass: true,
+              reasons: [],
+            },
+          ],
+        },
+        pending: undefined,
+      },
+      loading: new Set(['pending']),
+      isFetching: true,
+      loadReports: vi.fn(),
+    });
+    const html = renderToStaticMarkup(
+      <StaticRouter location="/">
+        <ObservationReports
+          epochIndex={546}
+          gatewayAddress="wallet"
+          reports={{ author: 'complete', other: 'pending' }}
+        />
+      </StaticRouter>,
+    );
+    const text = html.replace(/<[^>]*>/g, '');
+    expect(text).toContain('0 failed, 1 passed, 1 loading of 2 submissions');
+    expect(html).toContain('>Passed</div>');
+    expect(html).toContain('>Loading</div>');
+  });
+
+  it('leaves the outgoing report unloaded until requested', () => {
+    const html = renderToStaticMarkup(
+      <StaticRouter location="/">
+        <ObservationReports
+          epochIndex={546}
+          gatewayAddress="wallet"
+          observerAddress="author"
+          reports={{ author: 'unread' }}
+        />
+      </StaticRouter>,
+    );
+    expect(html).toContain('Report not loaded.');
+    expect(html).toContain('Load report');
+    expect(html).not.toContain('unavailable');
   });
 });

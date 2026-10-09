@@ -34,7 +34,12 @@ describe('historical report recovery', () => {
       new QueryClient(),
     );
     expect(result.available?.assessments).toEqual([
-      { host: 'gateway.example', wallets: ['wallet'], pass: false },
+      {
+        host: 'gateway.example',
+        wallets: ['wallet'],
+        pass: false,
+        reasons: [],
+      },
     ]);
     expect(result.missing).toBeNull();
   });
@@ -52,6 +57,43 @@ describe('historical report recovery', () => {
     expect(selected.shared?.assessments[0].pass).toBe(false);
     await fetchObservationReports(['other'], 546, client);
     expect(downloadReport).toHaveBeenCalledTimes(2);
+    client.clear();
+  });
+
+  it('publishes completed reports to the cache while a bounded batch is still loading', async () => {
+    const release = new Map<string, () => void>();
+    let active = 0;
+    let peak = 0;
+    vi.mocked(downloadReport).mockImplementation(async (id) => {
+      active++;
+      peak = Math.max(peak, active);
+      await new Promise<void>((resolve) => release.set(id, resolve));
+      active--;
+      return strToU8(JSON.stringify(report));
+    });
+    const client = new QueryClient();
+    const done = fetchObservationReports(['a', 'b', 'c', 'd'], 546, client);
+    await vi.waitFor(() => expect(release.size).toBe(3));
+    const first = [...release.keys()][0];
+    release.get(first)!();
+    await vi.waitFor(() => expect(release.size).toBe(4));
+    expect(client.getQueryData(['observationReport', 546, first])).toEqual({
+      assessments: [
+        {
+          host: 'gateway.example',
+          wallets: ['wallet'],
+          pass: false,
+          reasons: [],
+        },
+      ],
+    });
+    expect(
+      client.getQueryData(['observationReport', 546, 'a']),
+    ).toBeUndefined();
+    expect(active).toBe(3);
+    for (const resolve of release.values()) resolve();
+    await done;
+    expect(peak).toBe(3);
     client.clear();
   });
 
@@ -73,5 +115,38 @@ describe('historical report recovery', () => {
         546,
       ),
     ).toThrow();
+  });
+
+  it('rejects a report without an epoch', () => {
+    expect(() =>
+      readObservationReport({ ...report, epochIndex: undefined }, 546),
+    ).toThrow();
+  });
+
+  it('preserves the expected wallets and extracts failure explanations', () => {
+    const parsed = readObservationReport(
+      {
+        ...report,
+        gatewayAssessments: {
+          'old-host.example': {
+            pass: false,
+            ownershipAssessment: {
+              expectedWallets: ['wallet'],
+              pass: false,
+              failureReason: 'Response code 503',
+            },
+          },
+        },
+      },
+      546,
+    );
+    expect(parsed.assessments).toEqual([
+      {
+        host: 'old-host.example',
+        wallets: ['wallet'],
+        pass: false,
+        reasons: ['Response code 503 \u2014 ownership check'],
+      },
+    ]);
   });
 });

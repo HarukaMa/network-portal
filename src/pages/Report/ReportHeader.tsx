@@ -3,8 +3,10 @@ import Button from '@src/components/Button';
 import Placeholder from '@src/components/Placeholder';
 import Profile from '@src/components/Profile';
 import { downloadReport } from '@src/hooks/useReport';
+import { MOBILE_MENU_CLEARANCE } from '@src/layout/mobileMenu';
 import { ReportData } from '@src/types';
 import { formatDateTime } from '@src/utils';
+import { showErrorToast } from '@src/utils/toast';
 import { saveAs } from 'file-saver';
 import { ChevronRightIcon, Download, NotebookText } from 'lucide-react';
 import { Link, useParams } from 'react-router-dom';
@@ -23,7 +25,9 @@ const ReportHeader = ({
 
   return (
     <header className="flex-col text-clip rounded-xl leading-[1.4] lg:mt-6 lg:border dark:border-transparent-100-8 dark:bg-grey-1000 dark:text-grey-300">
-      <div className="flex items-center gap-3 py-5 pl-6 pr-4 text-sm">
+      <div
+        className={`flex min-w-0 items-center gap-3 py-5 pr-4 text-sm ${MOBILE_MENU_CLEARANCE}`}
+      >
         <div className="hidden items-center gap-3 lg:flex">
           <div className="text-mid">
             <Link to={'/gateways'}>Gateways</Link>
@@ -64,11 +68,17 @@ const ReportHeader = ({
             active={true}
             onClick={async () => {
               if (reportId && reportData) {
-                const reportData = await downloadReport(reportId);
-                const blob = new Blob([reportData], {
-                  type: 'application/json',
-                });
-                saveAs(blob, `report-${reportId}.json`);
+                try {
+                  const reportData = await downloadReport(reportId);
+                  const blob = new Blob([reportData], {
+                    type: 'application/json',
+                  });
+                  saveAs(blob, `report-${reportId}.json`);
+                } catch (_e) {
+                  showErrorToast(
+                    `Error: Unable to download report ${reportId}`,
+                  );
+                }
               }
             }}
           />

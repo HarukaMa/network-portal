@@ -1,6 +1,9 @@
+import { summarizeGatewayAssessment } from '@src/utils/gatewayAssessment';
 import {
   type QueryClient,
-  useQuery,
+  useMutation,
+  useMutationState,
+  useQueries,
   useQueryClient,
 } from '@tanstack/react-query';
 import { strFromU8 } from 'fflate';
@@ -10,6 +13,7 @@ export interface ReportAssessment {
   host: string;
   wallets: string[];
   pass: boolean;
+  reasons: string[];
 }
 
 export interface ObservationReport {
@@ -43,11 +47,27 @@ export function readObservationReport(
       ) {
         throw new Error('Report contains an invalid gateway assessment.');
       }
-      return { host, wallets, pass: assessment.pass };
+      return {
+        host,
+        wallets,
+        pass: assessment.pass,
+        reasons: summarizeGatewayAssessment(assessment)!.reasons,
+      };
     },
   );
   return { assessments };
 }
+
+const reportQuery = (id: string, epochIndex: number) => ({
+  queryKey: ['observationReport', epochIndex, id],
+  queryFn: async () =>
+    readObservationReport(
+      JSON.parse(strFromU8(await downloadReport(id))),
+      epochIndex,
+    ),
+  staleTime: 5 * 60 * 1000,
+  retry: false as const,
+});
 
 export async function fetchObservationReports(
   reportIds: string[],
@@ -61,16 +81,9 @@ export async function fetchObservationReports(
     Array.from({ length: Math.min(3, pending.length) }, async () => {
       for (let id = pending.pop(); id !== undefined; id = pending.pop()) {
         try {
-          results[id] = await queryClient.fetchQuery({
-            queryKey: ['observationReport', epochIndex, id],
-            queryFn: async () =>
-              readObservationReport(
-                JSON.parse(strFromU8(await downloadReport(id))),
-                epochIndex,
-              ),
-            staleTime: 5 * 60 * 1000,
-            retry: false,
-          });
+          results[id] = await queryClient.fetchQuery(
+            reportQuery(id, epochIndex),
+          );
         } catch {
           results[id] = null;
         }
@@ -86,10 +99,39 @@ export default function useObservationReports(
 ) {
   const queryClient = useQueryClient();
   const reportIds = [...new Set(Object.values(reports))].sort();
-  return useQuery({
-    queryKey: ['observationReports', epochIndex, reportIds],
-    queryFn: () => fetchObservationReports(reportIds, epochIndex, queryClient),
-    enabled: reportIds.length > 0,
-    staleTime: 5 * 60 * 1000,
+  const queries = useQueries({
+    queries: reportIds.map((id) => ({
+      ...reportQuery(id, epochIndex),
+      enabled: false,
+    })),
   });
+  const mutationKey = ['loadObservationReports', epochIndex];
+  const pending = useMutationState({
+    filters: { mutationKey, status: 'pending' },
+    select: (mutation) => mutation.state.variables as string[],
+  });
+  const loader = useMutation({
+    mutationKey,
+    // Share the three-download limit across both panels and queued clicks.
+    scope: { id: 'loadObservationReports' },
+    mutationFn: (ids: string[]) =>
+      fetchObservationReports(ids, epochIndex, queryClient),
+  });
+  const loading = new Set(pending.flat());
+  const data: Record<string, ObservationReport | null | undefined> = {};
+  reportIds.forEach((id, index) => {
+    const query = queries[index];
+    data[id] = query.data ?? (query.isError ? null : undefined);
+  });
+  return {
+    data,
+    loading,
+    isFetching: loading.size > 0,
+    loadReports: (ids: string[]) => {
+      const requested = [...new Set(ids)].filter(
+        (id) => reportIds.includes(id) && !data[id] && !loading.has(id),
+      );
+      if (requested.length > 0) loader.mutate(requested);
+    },
+  };
 }
