@@ -1,0 +1,152 @@
+import { QueryClient } from '@tanstack/react-query';
+import { strToU8 } from 'fflate';
+import { afterEach, describe, expect, it, vi } from 'vitest';
+import {
+  fetchObservationReports,
+  readObservationReport,
+} from './useObservationReports';
+import { downloadReport } from './useReport';
+
+vi.mock('./useReport', () => ({ downloadReport: vi.fn() }));
+
+afterEach(() => vi.resetAllMocks());
+
+const report = {
+  epochIndex: 546,
+  observerAddress: 'observer',
+  gatewayAssessments: {
+    'gateway.example': {
+      pass: false,
+      ownershipAssessment: { expectedWallets: ['wallet'] },
+    },
+  },
+};
+
+describe('historical report recovery', () => {
+  it('keeps named failures when another report cannot be downloaded', async () => {
+    vi.mocked(downloadReport).mockImplementation(async (id) => {
+      if (id === 'missing') throw new Error('404');
+      return strToU8(JSON.stringify(report));
+    });
+    const result = await fetchObservationReports(
+      ['available', 'missing'],
+      546,
+      new QueryClient(),
+    );
+    expect(result.available?.assessments).toEqual([
+      {
+        host: 'gateway.example',
+        wallets: ['wallet'],
+        pass: false,
+        reasons: [],
+      },
+    ]);
+    expect(result.missing).toBeNull();
+  });
+
+  it('downloads overlapping reports once and reuses them when another panel opens', async () => {
+    vi.mocked(downloadReport).mockResolvedValue(
+      strToU8(JSON.stringify(report)),
+    );
+    const client = new QueryClient();
+    const [all, selected] = await Promise.all([
+      fetchObservationReports(['shared', 'other'], 546, client),
+      fetchObservationReports(['shared'], 546, client),
+    ]);
+    expect(all.shared?.assessments[0].pass).toBe(false);
+    expect(selected.shared?.assessments[0].pass).toBe(false);
+    await fetchObservationReports(['other'], 546, client);
+    expect(downloadReport).toHaveBeenCalledTimes(2);
+    client.clear();
+  });
+
+  it('publishes completed reports to the cache while a bounded batch is still loading', async () => {
+    const release = new Map<string, () => void>();
+    let active = 0;
+    let peak = 0;
+    vi.mocked(downloadReport).mockImplementation(async (id) => {
+      active++;
+      peak = Math.max(peak, active);
+      await new Promise<void>((resolve) => release.set(id, resolve));
+      active--;
+      return strToU8(JSON.stringify(report));
+    });
+    const client = new QueryClient();
+    const done = fetchObservationReports(['a', 'b', 'c', 'd'], 546, client);
+    await vi.waitFor(() => expect(release.size).toBe(3));
+    const first = [...release.keys()][0];
+    release.get(first)!();
+    await vi.waitFor(() => expect(release.size).toBe(4));
+    expect(client.getQueryData(['observationReport', 546, first])).toEqual({
+      assessments: [
+        {
+          host: 'gateway.example',
+          wallets: ['wallet'],
+          pass: false,
+          reasons: [],
+        },
+      ],
+    });
+    expect(
+      client.getQueryData(['observationReport', 546, 'a']),
+    ).toBeUndefined();
+    expect(active).toBe(3);
+    for (const resolve of release.values()) resolve();
+    await done;
+    expect(peak).toBe(3);
+    client.clear();
+  });
+
+  it('rejects a report from another epoch', () => {
+    expect(() => readObservationReport(report, 545)).toThrow();
+  });
+
+  it('rejects a missing result instead of treating it as a failure', () => {
+    expect(() =>
+      readObservationReport(
+        {
+          ...report,
+          gatewayAssessments: {
+            'gateway.example': {
+              ownershipAssessment: { expectedWallets: ['wallet'] },
+            },
+          },
+        },
+        546,
+      ),
+    ).toThrow();
+  });
+
+  it('rejects a report without an epoch', () => {
+    expect(() =>
+      readObservationReport({ ...report, epochIndex: undefined }, 546),
+    ).toThrow();
+  });
+
+  it('preserves the expected wallets and extracts failure explanations', () => {
+    const parsed = readObservationReport(
+      {
+        ...report,
+        gatewayAssessments: {
+          'old-host.example': {
+            pass: false,
+            ownershipAssessment: {
+              expectedWallets: ['wallet'],
+              pass: false,
+              failureReason: 'Response code 503',
+            },
+          },
+        },
+      },
+      546,
+    );
+    expect(parsed.assessments).toEqual([
+      {
+        host: 'old-host.example',
+        wallets: ['wallet'],
+        pass: false,
+        reasons: ['Response code 503 \u2014 ownership check'],
+      },
+    ]);
+  });
+});

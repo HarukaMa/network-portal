@@ -35,7 +35,7 @@ const StatsPanel = ({ gateway }: StatsPanelProps) => {
   }, [gateway]);
 
   return (
-    <div className="size-fit w-full rounded-xl border border-transparent-100-16 text-sm">
+    <div className="size-fit w-full overflow-hidden rounded-xl border border-transparent-100-16 text-sm">
       <div className="bg-containerL3 px-6 py-4">
         <div className="text-high">Stats</div>
       </div>

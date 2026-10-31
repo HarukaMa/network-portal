@@ -1,11 +1,4 @@
-/**
- * What one observer said about one gateway, read from their report.
- *
- * The on-chain observation is a bitmap indexed by the gateway's slot in that
- * epoch's registry, and the archive publishes only a digest of that ordering —
- * so a closed epoch can be counted but not attributed. The report the observer
- * uploaded has no such problem: it is keyed by FQDN and carries the reason.
- */
+/** An observer's report assessment, kept separate from its on-chain vote. */
 export type AssessmentOutcome = {
   pass: boolean;
   /** Empty for a pass, and for a failure the report did not explain. */
