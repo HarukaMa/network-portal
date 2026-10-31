@@ -1,3 +1,4 @@
+import { execFileSync } from 'node:child_process';
 import path from 'path';
 /// <reference types="vitest/config" />
 import react from '@vitejs/plugin-react';
@@ -6,7 +7,14 @@ import { nodePolyfills } from 'vite-plugin-node-polyfills';
 import svgr from 'vite-plugin-svgr';
 import packageJson from './package.json';
 
-// https://vitejs.dev/config/
+const commit =
+  process.env.BUILD_COMMIT ||
+  execFileSync('git', ['rev-parse', 'HEAD'], {
+    cwd: __dirname,
+    encoding: 'utf8',
+  }).trim();
+const assetsDir = `assets/${commit}`;
+
 export default defineConfig({
   esbuild: false,
   build: {
@@ -16,56 +24,53 @@ export default defineConfig({
     sourcemap: false,
     minify: true,
     cssMinify: true,
+    assetsDir,
+    // Automatic CommonJS wrapping can race and change otherwise identical builds.
+    commonjsOptions: { strictRequires: true },
     rollupOptions: {
       output: {
-        /**
-         * Hold every dependency in one chunk, separate from application code.
-         *
-         * This is about deploy cost, not load time. `ar-io-deploy` dedupes
-         * per file against the previous release, so an unchanged file is
-         * never re-uploaded or re-paid — but a chunk's name carries a hash of
-         * its contents, so a chunk counts as unchanged only if everything
-         * inside it is.
-         *
-         * Everything used to share one entry chunk: application code and
-         * every dependency, 3.4MB of a 4.4MB deploy. Editing one line of copy
-         * rewrote that chunk, so every release re-uploaded all 3.4MB,
-         * permanently. Splitting them was supposed to stop that.
-         *
-         * **It does not, and the measurement says so.** On the v2.12.1 deploy
-         * `ario-deploy` reported 11 of 43 files cached, and the new
-         * `vendor-*.js` 404s inside the v2.12.0 manifest — it changed and all
-         * 3.39MB of it was re-uploaded. Only the CSS deduped. Two local builds
-         * differing solely in application code produce vendor chunks differing
-         * by ~194 bytes: there are no chunk-filename references inside vendor,
-         * but the exported surface it emits depends on what the app imports,
-         * so ordinary app edits perturb it. Do not restore the claim that this
-         * chunk is stable across releases without re-measuring it.
-         *
-         * The split is still worth keeping — it is the precondition for any
-         * dedupe at all, and it isolates the dependency bulk from the ~205KB
-         * entry. But the per-release saving it was justified by did not
-         * materialise. The remaining lever is `Content-Encoding`, which takes
-         * the JS from ~4.3MB to ~1.1MB and, unlike dedupe, applies to every
-         * release; `ar-io-deploy` sets only `Content-Type` today.
-         *
-         * To re-check on a future release: read "N/M files cached" in the
-         * Arweave job log, then
-         * `curl -o /dev/null -w '%{http_code}' <gateway>/<oldTxId>/assets/<newChunkName>`
-         * — 200 means deduped, 404 means re-uploaded.
-         *
-         * **A finer split does not work here, and the failure is invisible to
-         * the build.** Grouping by upgrade cadence — charts, web3.js and its
-         * Node crypto polyfills, the ar.io packages, the rest — builds
-         * cleanly, is meaningfully smaller still, and then white-screens
-         * every route with "Cannot access 'j0' before initialization". The
-         * `@solana` packages are circularly entangled, so a boundary drawn
-         * through them reorders their initialisation. Anything beyond this
-         * one predicate has to be proved by loading the built output, not by
-         * a green build.
-         */
-        manualChunks(id: string) {
-          if (id.includes('node_modules')) return 'vendor';
+        // Keep chunk export names stable so unchanged vendor chunks stay byte-identical.
+        minifyInternalExports: false,
+        entryFileNames: `${assetsDir}/[name].js`,
+        chunkFileNames: (chunk) => {
+          const name = chunk.facadeModuleId
+            ? path
+                .relative(__dirname, chunk.facadeModuleId)
+                .replaceAll('\\', '/')
+                .replace(/\.[^/.]+$/, '')
+            : chunk.name;
+          return `${assetsDir}/chunks/${name}.js`;
+        },
+        assetFileNames: `${assetsDir}/[name][extname]`,
+        manualChunks: (id) => {
+          const moduleId = id.replaceAll('\\', '/');
+          if (moduleId.endsWith('/src/version.ts')) return 'version';
+          // Keep shared helpers below their consumers to avoid initialization cycles.
+          if (moduleId === '\0commonjsHelpers.js') return 'vendor-utils';
+          const dependency = moduleId.split('/node_modules/').at(-1);
+          if (dependency === moduleId || !dependency) return;
+          if (
+            /^(react[^/]*|scheduler|zustand|lucide-react|recharts[^/]*|better-react-mathjax|markdown-to-jsx|dexie-react-hooks|use-sync-external-store|use-callback-ref|use-sidecar|@(?:tanstack|radix-ui|headlessui|react-aria|react-stately|floating-ui)\/[^/]+)\//.test(
+              dependency,
+            )
+          ) {
+            return 'vendor-ui';
+          }
+          if (
+            /^(@solana(?:-mobile|-program)?\/[^/]+|@metaplex-foundation\/[^/]+|@coral-xyz\/[^/]+)\//.test(
+              dependency,
+            )
+          ) {
+            return 'vendor-solana';
+          }
+          if (
+            /^(@ar\.io\/[^/]+|arweave|arbundles|@dha-team\/[^/]+)\//.test(
+              dependency,
+            )
+          ) {
+            return 'vendor-ario';
+          }
+          return 'vendor-utils';
         },
       },
     },
@@ -74,6 +79,7 @@ export default defineConfig({
   base: '',
   define: {
     __NPM_PACKAGE_VERSION__: JSON.stringify(packageJson.version),
+    __BUILD_COMMIT__: JSON.stringify(commit),
     'process.env': {
       // DO NOT EXPOSE THE ENTIRE process.env HERE - sensitive information on CI/CD could be exposed.
       // defining here as an empty object as there are errors otherwise

@@ -62,7 +62,7 @@ jobs:
         env:
           # FOR BUILD
           VITE_NODE_ENV: develop
-          VITE_GITHUB_HASH: ${{ github.sha }}
+          BUILD_COMMIT: ${{ github.sha }}
           VITE_ARIO_PROCESS_ID: ${{ vars.VITE_ARIO_PROCESS_ID }}
           # ao infra settings
           VITE_AO_CU_URL: ${{ vars.VITE_AO_CU_URL }}

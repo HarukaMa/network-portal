@@ -6,8 +6,8 @@
   "scripts": {
     "build": "yarn clean && tsc --build tsconfig.build.json && cross-env NODE_OPTIONS=--max-old-space-size=32768 vite build",
     "clean": "rimraf dist",
-    "dev": "cross-env NODE_ENV=prod VITE_GITHUB_HASH=local vite",
-    "dev:localnet": "cross-env NODE_ENV=prod VITE_GITHUB_HASH=local vite --mode localnet",
+    "dev": "cross-env NODE_ENV=prod BUILD_COMMIT=local vite",
+    "dev:localnet": "cross-env NODE_ENV=prod BUILD_COMMIT=local vite --mode localnet",
     "lint:fix": "biome check --write --unsafe",
     "lint:check": "biome check --unsafe",
     "format:fix": "biome format --write",
